@@ -101,8 +101,8 @@ process MergeBamAlignment {
 	file fasta_ref_fai
 	file fasta_ref_dict
 	file gatk4
-	file sam from BwaMem_output
-	file bam from FastqToSam_output
+	set pair_id, file(sam) from BwaMem_output
+	set pair_id, file(bam) from FastqToSam_output
 
 	output:
 	file "mergebam.fastqtosam.bwa.bam" into MergeBamAlignment_output
