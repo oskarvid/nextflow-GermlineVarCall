@@ -1,26 +1,26 @@
 #! /usr/bin/env nextflow
 
 //params.fastqs = "/home/oskar/01-workspace/01-data/fastq/kek/NA12878*R*.fastq"
-params.gatk4 = "/data/workspace/wdl_pipeline/tools/GATK4.jar"
-params.gatk3 = "/data/workspace/wdl_pipeline/tools/GenomeAnalysisTK.jar"
-//params.read1 = "/home/oskar/wdl_pipeline_bak/data/test_R1.fastq"
-//params.read2 = "/home/oskar/wdl_pipeline_bak/data/test_R2.fastq"
-params.fasta_ref = "/data/pipeline/b37_decoy_reference_files/human_g1k_v37_decoy.fasta"
-params.dbsnp_vcf = "/data/pipeline/b37_decoy_reference_files/dbsnp.vcf"
-params.dbsnp_vcf_index = "/data/pipeline/b37_decoy_reference_files/dbsnp.vcf.idx"
-params.mills_vcf = "/data/pipeline/b37_decoy_reference_files/Mills_and_1000G_gold_standard.indels.b37.vcf"
-params.mills_vcf_index = "/data/pipeline/b37_decoy_reference_files/Mills_and_1000G_gold_standard.indels.b37.vcf.idx"
-params.hapmap_vcf = "/data/pipeline/b37_decoy_reference_files/hapmap.vcf"
-params.hapmap_vcf_index = "/data/pipeline/b37_decoy_reference_files/hapmap.vcf.idx"
-params.v1000g_vcf = "/data/pipeline/b37_decoy_reference_files/1000g.vcf"
-params.v1000g_vcf_index = "/data/pipeline/b37_decoy_reference_files/1000g.vcf.idx"
-params.omni_vcf = "/data/pipeline/b37_decoy_reference_files/omni.vcf"
-params.omni_vcf_index = "/data/pipeline/b37_decoy_reference_files/omni.vcf.idx"
+params.gatk4 = "/home/oskar/wdl_pipeline_bak/tools/GATK-4.jar"
+params.gatk3 = "/home/oskar/wdl_pipeline_bak/tools/GenomeAnalysisTK.jar"
+params.read1 = "/home/oskar/wdl_pipeline_bak/data/test_R1.fastq"
+params.read2 = "/home/oskar/wdl_pipeline_bak/data/test_R2.fastq"
+params.fasta_ref = "/home/oskar/01-workspace/04-pipelines/GATK-Ghislain/ref_filer/human_g1k_v37_decoy.fasta"
+params.dbsnp_vcf = "/home/oskar/01-workspace/04-pipelines/GATK-Ghislain/ref_filer/dbsnp.vcf"
+params.dbsnp_vcf_index = "/home/oskar/01-workspace/04-pipelines/GATK-Ghislain/ref_filer/dbsnp.vcf.idx"
+params.mills_vcf = "/home/oskar/01-workspace/04-pipelines/GATK-Ghislain/ref_filer/Mills_and_1000G_gold_standard.indels.b37.vcf"
+params.mills_vcf_index = "/home/oskar/01-workspace/04-pipelines/GATK-Ghislain/ref_filer/Mills_and_1000G_gold_standard.indels.b37.vcf.idx"
+params.hapmap_vcf = "/home/oskar/01-workspace/04-pipelines/GATK-Ghislain/ref_filer/hapmap.vcf"
+params.hapmap_vcf_index = "/home/oskar/01-workspace/04-pipelines/GATK-Ghislain/ref_filer/hapmap.vcf.idx"
+params.v1000g_vcf = "/home/oskar/01-workspace/04-pipelines/GATK-Ghislain/ref_filer/1000g.vcf"
+params.v1000g_vcf_index = "/home/oskar/01-workspace/04-pipelines/GATK-Ghislain/ref_filer/1000g.vcf.idx"
+params.omni_vcf = "/home/oskar/01-workspace/04-pipelines/GATK-Ghislain/ref_filer/omni.vcf"
+params.omni_vcf_index = "/home/oskar/01-workspace/04-pipelines/GATK-Ghislain/ref_filer/omni.vcf.idx"
 
 gatk4 = file(params.gatk4)
 gatk3 = file(params.gatk3)
-//read1 = file(params.read1)
-//read2 = file(params.read2)
+read1 = file(params.read1)
+read2 = file(params.read2)
 fasta_ref = file(params.fasta_ref)
 fasta_ref_fai = file( params.fasta_ref+'.fai' )
 fasta_ref_sa = file( params.fasta_ref+'.sa' )
@@ -41,11 +41,8 @@ hapmap_vcf = file(params.hapmap_vcf)
 hapmap_vcf_index = file(params.hapmap_vcf_index)
 
 Channel
-  .fromFilePairs( "/data/workspace/data/Samples/NA12878-rep7_S7_L00*_R{1,2}_001.fastq.gz", flat: true) 
-  .set { reads }
-Channel
-  .fromFilePairs( "/data/workspace/data/Samples/NA12878-rep7_S7_L00*_R{1,2}_001.fastq.gz", flat: true) 
-  .set { reads2 }
+  .fromFilePairs( "/home/oskar/01-workspace/01-data/fastq/kek/test-L*_R{1,2}.fastq", flat: true)
+  .into { reads; reads2 }
 
 process BwaMem {
 
@@ -61,12 +58,12 @@ maxForks = 1
     file fasta_ref_pac
 
     output:
-    file "bwamem.sam" into BwaMem_output
+    set pair_id, file("bwamem.sam") into BwaMem_output
 
     shell:
     """
-    bwa mem -t 18 $fasta_ref \
-      -R "@RG\\tID:G\\tSM:test\\tLB:RH\\tPL:ILLUMINA\\tPU:NotDefined" \
+    bwa mem -t 2 $fasta_ref \
+      -R '@RG\\tID:G\\tSM:test\\tLB:RH\\tPL:ILLUMINA\\tPU:NotDefined' \
       -M $read1 $read2 > bwamem.sam
     """
 }
@@ -75,10 +72,10 @@ process FastqToSam {
 
 	input:
 	file gatk4
-    set pair_id2, file(read1), file(read2) from reads2
+    set pair_id, file(read1), file(read2) from reads2
 
 	output:
-	file "FastqToSam.bam" into FastqToSam_output
+	set pair_id, file("FastqToSam.bam") into FastqToSam_output
 
 	shell:
 	"""
@@ -110,7 +107,7 @@ process MergeBamAlignment {
 	output:
 	file "mergebam.fastqtosam.bwa.bam" into MergeBamAlignment_output
 
-	shell:
+	script:
 	"""
 	java -Dsnappy.disable=true -Xmx16G -XX:ParallelGCThreads=16 -Djava.io.tmpdir=`pwd`/tmp -jar \
       $gatk4 \
