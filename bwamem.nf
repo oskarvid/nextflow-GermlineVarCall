@@ -94,21 +94,23 @@ process FastqToSam {
 	"""
 }
 
+sam_and_bam_ch = FastqToSam_output.phase(BwaMem_output).map { left, right -> tuple(left[0], left[1], right[1]) }
+
 process MergeBamAlignment {
 
 	input:
+	file gatk4
 	file fasta_ref
 	file fasta_ref_fai
 	file fasta_ref_dict
-	file gatk4
-	set pair_id, file(sam) from BwaMem_output
-	set pair_id, file(bam) from FastqToSam_output
+	set pair_id, file(bam), file(sam) from sam_and_bam_ch
 
 	output:
-	file "mergebam.fastqtosam.bwa.bam" into MergeBamAlignment_output
+	file("mergebam.fastqtosam.bwa.bam") into MergeBamAlignment_output
 
 	script:
 	"""
+	echo ${pair_id} ${bam} ${sam} && \
 	java -Dsnappy.disable=true -Xmx16G -XX:ParallelGCThreads=16 -Djava.io.tmpdir=`pwd`/tmp -jar \
       $gatk4 \
       MergeBamAlignment \
@@ -159,11 +161,10 @@ process MarkDup {
 }
 
 process BaseRecalibrator {
+	maxForks = 2
 
 	input:
 	file gatk4
-	file bam from MarkDup_bamoutput
-	file bai from MarkDup_baioutput
 	file fasta_ref
 	file fasta_ref_fai
 	file fasta_ref_dict
@@ -173,31 +174,52 @@ process BaseRecalibrator {
 	file dbsnp_vcf_index
 	file v1000g_vcf_index
 	file mills_vcf_index
+	each intervals from file(params.contigs).readLines().findAll{ it }
+	file(read) from read1
 
 	output:
 	file("recalibration_report.grp") into BaseRecalibrator_output
 
-	shell:
-	"""
-	java -Dsnappy.disable=true -XX:ParallelGCThreads=4 \
+	script:
+    def interval = intervals.tokenize('\t').collect{ "-L $it" }.join(" ")
+	"java -Dsnappy.disable=true -XX:ParallelGCThreads=4 \
 	  -Dsamjdk.use_async_io=false -Xmx13G \
-	  -jar $gatk4} \
+	  -jar $gatk4 \
 	  BaseRecalibrator \
-	  --reference $fasta_ref} \
-	  --input $bam} \
+	  --reference $fasta_ref \
+	  --input $read \
 	  -O recalibration_report.grp \
-	  --knownSites $dbsnp_vcf} \
-	  --knownSites $v1000g_vcf} \
-	  --knownSites $mills_vcf}
-	"""
+	  --knownSites $dbsnp_vcf \
+	  --knownSites $v1000g_vcf \
+	  --knownSites $mills_vcf \
+	  $interval 2> info"
+}
+
+process GatherBqsrReports {
+	
+	input:
+	file gatk4
+	file input_bqsr_reports from BaseRecalibrator_output.collect()
+
+	output:
+	file("gathered_recalibration_reports.grp") into GatherBqsrReports_output
+
+	script:
+	def input_reports = input_bqsr_reports.collect{ "--input $it" }.join(" ")
+	"java -Dsnappy.disable=true -Xmx16G -jar \
+      $gatk4 \
+      GatherBQSRReports \
+      $input_reports \
+      -O gathered_recalibration_reports.grp"
 }
 
 process ApplyBQSR {
+
 	input:
 	file gatk4
-	file bam from MarkDup_bamoutput
-	file bam_index from MarkDup_baioutput
-	file recalibration_report from BaseRecalibrator_output
+	file read from read1
+	file recalibration_report from GatherBqsrReports_output
+	each intervals from file(params.contigs).readLines().findAll{ it }
 	file fasta_ref
 	file fasta_ref_fai
 	file fasta_ref_dict
@@ -207,22 +229,42 @@ process ApplyBQSR {
 	file("applybqsr.markdup.mergebam.fastqtosam.bwa.bai") into ApplyBQSR_baioutput
 
 	shell:
+    def interval = intervals.tokenize('\t').collect{ "-L $it" }.join(" ")
 	"""
 	java -Dsnappy.disable=true -Xmx13G -XX:ParallelGCThreads=4 \
 	  -jar $gatk4 \
 	  ApplyBQSR \
 	  --reference $fasta_ref \
-	  --input $bam \
+	  --input $read \
 	  -O applybqsr.markdup.mergebam.fastqtosam.bwa.bam \
 	  --createOutputBamIndex true \
-	  -bqsr $recalibration_report
+	  -bqsr $recalibration_report \
+	  $interval
 	"""
+}
+
+process GatherBamFiles {
+	input:
+	file gatk4
+	file input_bams from ApplyBQSR_bamoutput.collect()
+
+	output:
+	file("gatheredbams.applybqsr.baserecal.markdup.fastqtosam.bwa.bam") into GatherBamFiles_bamoutput
+	file("gatheredbams.applybqsr.baserecal.markdup.fastqtosam.bwa.bai") into GatherBamFiles_baioutput
+
+	script:
+	"java -Dsnappy.disable=true -Xmx16G -XX:ParallelGCThreads=4 -Djava.io.tmpdir=`pwd`/tmp -jar \
+      $gatk4 \
+      GatherBamFiles \
+      --input $input_bams \
+      -O gatheredbams.applybqsr.baserecal.markdup.fastqtosam.bwa.bam \
+      --CREATE_INDEX true"
 }
 
 process HaplotypeCaller {
 	input:
 	file gatk3
-	file bam from ApplyBQSR_bamoutput
+	file bam from ApplyBQSR_bamoutput #should be GatherBamFiles_bamoutput
 	file bam_index from ApplyBQSR_baioutput
 	file fasta_ref_dict
 	file fasta_ref
