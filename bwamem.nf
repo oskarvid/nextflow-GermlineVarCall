@@ -16,6 +16,8 @@ params.v1000g_vcf = "/home/oskar/01-workspace/04-pipelines/GATK-Ghislain/ref_fil
 params.v1000g_vcf_index = "/home/oskar/01-workspace/04-pipelines/GATK-Ghislain/ref_filer/1000g.vcf.idx"
 params.omni_vcf = "/home/oskar/01-workspace/04-pipelines/GATK-Ghislain/ref_filer/omni.vcf"
 params.omni_vcf_index = "/home/oskar/01-workspace/04-pipelines/GATK-Ghislain/ref_filer/omni.vcf.idx"
+params.input_tsv = "/home/oskar/01-workspace/00-temp/wdl_pipeline/intervals/template_sample_manifest_na12878.tsv"
+params.contigs = "/home/oskar/01-workspace/00-temp/wdl_pipeline/intervals/groups.list"
 
 gatk4 = file(params.gatk4)
 gatk3 = file(params.gatk3)
@@ -45,10 +47,11 @@ Channel
   .into { reads; reads2 }
 
 process BwaMem {
-
-maxForks = 1
+	tag { sample_name }
+	maxForks = 1
+    
     input:
-    set pair_id, file(read1), file(read2) from reads
+	set pair_id, each line from file(params.input_tsv).readLines().findAll{ it }
     file fasta_ref
     file fasta_ref_fai
     file fasta_ref_sa
@@ -60,35 +63,37 @@ maxForks = 1
     output:
     set pair_id, file("bwamem.sam") into BwaMem_output
 
-    shell:
+    script:
+    def item = line.tokenize('\t')
     """
     bwa mem -t 2 $fasta_ref \
-      -R '@RG\\tID:G\\tSM:test\\tLB:RH\\tPL:ILLUMINA\\tPU:NotDefined' \
-      -M $read1 $read2 > bwamem.sam
+      -R '@RG\\tID:${item[1]}\\tSM:${item[0]}\\tLB:${item[5]}\\tPL:${item[6]}\\tPU:NotDefined' \
+      -M ${item[3]} ${item[4]} > bwamem.sam
     """
 }
 
 process FastqToSam {
 
 	input:
+	set pair_id, each line from file(params.input_tsv).readLines().findAll{ it }
 	file gatk4
-    set pair_id, file(read1), file(read2) from reads2
 
 	output:
 	set pair_id, file("FastqToSam.bam") into FastqToSam_output
 
-	shell:
+	script:
+	def item = line.tokenize('\t')
 	"""
 	java -Xmx16G -Dsnappy.disable=true -XX:ParallelGCThreads=4 -Djava.io.tmpdir=`pwd`/tmp -jar \
       $gatk4 \
       FastqToSam \
-      --FASTQ $read1 \
-      --FASTQ2 $read2 \
+      --FASTQ ${item[3]} \
+      --FASTQ2 ${item[4]} \
       -O FastqToSam.bam \
-      --SAMPLE_NAME test \
-      --READ_GROUP_NAME G \
-      --LIBRARY_NAME RH \
-      --PLATFORM ILLUMINA \
+      --SAMPLE_NAME ${item[0]} \
+      --READ_GROUP_NAME ${item[1]} \
+      --LIBRARY_NAME ${item[5]} \
+      --PLATFORM ${item[6]} \
       --SORT_ORDER coordinate \
       2> info
 	"""
@@ -106,7 +111,7 @@ process MergeBamAlignment {
 	set pair_id, file(bam), file(sam) from sam_and_bam_ch
 
 	output:
-	file("mergebam.fastqtosam.bwa.bam") into MergeBamAlignment_output
+	set pair_id, file("mergebam.fastqtosam.bwa.bam") into MergeBamAlignment_output
 
 	script:
 	"""
@@ -175,7 +180,8 @@ process BaseRecalibrator {
 	file v1000g_vcf_index
 	file mills_vcf_index
 	each intervals from file(params.contigs).readLines().findAll{ it }
-	file(read) from read1
+	file bam from MarkDup_bamoutput
+	file bai from MarkDup_baioutput
 
 	output:
 	file("recalibration_report.grp") into BaseRecalibrator_output
@@ -187,7 +193,7 @@ process BaseRecalibrator {
 	  -jar $gatk4 \
 	  BaseRecalibrator \
 	  --reference $fasta_ref \
-	  --input $read \
+	  --input $bam \
 	  -O recalibration_report.grp \
 	  --knownSites $dbsnp_vcf \
 	  --knownSites $v1000g_vcf \
@@ -264,8 +270,8 @@ process GatherBamFiles {
 process HaplotypeCaller {
 	input:
 	file gatk3
-	file bam from ApplyBQSR_bamoutput #should be GatherBamFiles_bamoutput
-	file bam_index from ApplyBQSR_baioutput
+	file bam from GatherBamFiles_bamoutput
+	file bam_index from GatherBamFiles_baioutput
 	file fasta_ref_dict
 	file fasta_ref
 	file fasta_ref_fai
