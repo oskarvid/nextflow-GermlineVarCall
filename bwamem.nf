@@ -46,12 +46,18 @@ Channel
   .fromFilePairs( "/home/oskar/01-workspace/01-data/fastq/kek/test-L*_R{1,2}.fastq", flat: true)
   .into { reads; reads2 }
 
+Channel
+  .fromPath('/home/oskar/01-workspace/00-temp/nextflow-testing/template_sample_manifest_na12878.tsv')
+  .splitCsv(sep:'\t')
+  .map { cols -> tuple(file(cols[0]), file(cols[1]), file(cols[2]), file(cols[3]), file(cols[4]), file(cols[5]), file(cols[6])) }
+  .into { tsv_ch1; tsv_ch2 }
+
 process BwaMem {
 	tag { sample_name }
 	maxForks = 1
     
     input:
-	set pair_id, each line from file(params.input_tsv).readLines().findAll{ it }
+	file reads from tsv_ch1
     file fasta_ref
     file fasta_ref_fai
     file fasta_ref_sa
@@ -61,39 +67,37 @@ process BwaMem {
     file fasta_ref_pac
 
     output:
-    set pair_id, file("bwamem.sam") into BwaMem_output
+    file("bwamem.sam") into BwaMem_output
 
     script:
-    def item = line.tokenize('\t')
     """
     bwa mem -t 2 $fasta_ref \
-      -R '@RG\\tID:${item[1]}\\tSM:${item[0]}\\tLB:${item[5]}\\tPL:${item[6]}\\tPU:NotDefined' \
-      -M ${item[3]} ${item[4]} > bwamem.sam
+      -R '@RG\\tID:${reads[1]}\\tSM:${reads[0]}\\tLB:${reads[5]}\\tPL:${reads[6]}\\tPU:NotDefined' \
+      -M ${reads[3]} ${reads[4]} > bwamem.sam
     """
 }
 
 process FastqToSam {
 
 	input:
-	set pair_id, each line from file(params.input_tsv).readLines().findAll{ it }
+	file reads from tsv_ch2
 	file gatk4
 
 	output:
-	set pair_id, file("FastqToSam.bam") into FastqToSam_output
+	file("FastqToSam.bam") into FastqToSam_output
 
 	script:
-	def item = line.tokenize('\t')
 	"""
 	java -Xmx16G -Dsnappy.disable=true -XX:ParallelGCThreads=4 -Djava.io.tmpdir=`pwd`/tmp -jar \
       $gatk4 \
       FastqToSam \
-      --FASTQ ${item[3]} \
-      --FASTQ2 ${item[4]} \
+      --FASTQ ${reads[3]} \
+      --FASTQ2 ${reads[4]} \
       -O FastqToSam.bam \
-      --SAMPLE_NAME ${item[0]} \
-      --READ_GROUP_NAME ${item[1]} \
-      --LIBRARY_NAME ${item[5]} \
-      --PLATFORM ${item[6]} \
+      --SAMPLE_NAME ${reads[0]} \
+      --READ_GROUP_NAME ${reads[1]} \
+      --LIBRARY_NAME ${reads[5]} \
+      --PLATFORM ${reads[6]} \
       --SORT_ORDER coordinate \
       2> info
 	"""
