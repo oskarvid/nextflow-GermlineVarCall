@@ -48,7 +48,7 @@ Channel
 
 Channel
   .fromPath('/home/oskar/01-workspace/00-temp/nextflow-testing/template_sample_manifest_na12878.tsv')
-  .splitCsv(sep:'\t')
+  .splitCsv(sep:'\t') 
   .map { cols -> tuple(file(cols[0]), file(cols[1]), file(cols[2]), file(cols[3]), file(cols[4]), file(cols[5]), file(cols[6])) }
   .into { tsv_ch1; tsv_ch2 }
 
